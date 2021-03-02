@@ -1,0 +1,405 @@
+---
+title: \vspace{-1.5cm}Identifying the Patterns Present Within Red and White Wine and the Most Accurate Algorithm for Supervised Classification.    
+author: "Daniel Majer"
+output:
+  html_document:
+    code_folding: hide
+  geometry: margin = 0.1in
+  pdf_document:
+    latex_engine: xelatex
+    fig_caption: yes
+bibliography: capstone-references.bib
+---
+
+```{r setup, include=FALSE}
+library(tidyverse)
+library(corrplot)
+library(Hmisc)
+library(caret)
+library(naivebayes)
+library(MASS)
+library(reshape2)
+library(ROCR)
+library(ggfortify)
+library(plot3D)
+library(class)
+library(knitr)
+library(kableExtra)
+```
+
+# Abstract
+The grapevine Vitis Vinifera has an approximate 5000-10000 grape varieties throughout the world covering 0.5% of the world's agricultural land. Although there are many distinctive types, only a few are commercially successful therefore many business stakeholders involved with wine look to data mining methods to identify trends within the data determine the winning combination of chemical and physical properties of wines. The purpose of this report was to identify the patterns present in the dataset by performing principal component analysis and accurately classify the red and white wines using a number of supervised classification techniques. The results of PCA revealed that the red and white wine observation formed two distinctive clusters with majority of the variation occurring for the first 3 PCs. Overall all supervised classification algorithms yielded high performance metrics due to the pre-processing decisions enacted on the data. LDA was the most accurate classification method followed closely by KNN due to the separation of red and white clusters. The most important aspects when classifying red and white wines was sulfur dioxide, chlorides and volatile acidity whilst the least important aspects in differentiating was residual sugar, citric acid and alcohol. Differences between wine types are most likely due to the inherent differences that occur during the fermentation process whilst the least important aspect for classification are fermentation strategies similar to both wine types. 
+
+# Introduction
+The grapevine Vitis Vinifera has been cultivated throughout many cultures over world for thousands of years. This common grapevine can attribute an estimated 5000-10000 of red and white grape varieties which collectively cover approximately 0.5% of the world’s agricultural land (@del2019quantifying). Although there are many different varieties, only a few grape types are commercially popular for the production of red and white wines respectively (@del2019quantifying). The key feature that distinguishes wine colour is the use of grapes during the fermentation process. Simplistically red wine is juiced and fermented with the skin intact whilst white wine only utilises the juice from green grapes (@ballester2009odor). In the case of wine production, attaining quality is a complex and multidimensional aspect and mainly related to the sensory characteristics that each sip brings to the tasting experience (@ferreira2009modeling). For this reason many business stakeholders involved with the production and consumption of wine look to data mining methods to find inferences within their collected data @washington2014.
+
+The purpose of this report is to identify the patterns present in the datset by performing principal component analysis and accurately classify the wine type of the dataset using a number of supervised classification techniques. 
+
+# Data
+The dataset “Wine Quality” was sources from the Introduction to Data Mining Folder on the Learn James Cook University Website. This dataset was created by Paulo Cortez (Univ. Minho), Antonio Cerdeira, Fernando Almeida, Telmo Matos and Jose Reis (CVRVV) in 2009. The dataset was collected in an observation study which recorded the various attributes of red and white wines respectively. The winequality.names file specified that the two dataset are related to the red and white variants pf the Portuguese “Vinho Verde” wine. Due to the privacy and logistical issues, the names of the wines were removed from the original dataset and only the physicochemical and sensory variables were reported in the dataset. The wine quality dataset was separated into a red and white dataset in which the red dataset consisted of 1599 observation and 12 attributes, whilst the white contained the same number of attributes with 4898 observations. The following table displays the variable types present in the combined wine quality dataset:
+
+```{r}
+wine_metadata_table <- data.frame(
+  Attribute = c("fix.acidity", "volatile.acidity", "citric.acid", "residual.sugar", "chlorides", "free.sulfur.dioxide",
+              "total.sulfur.dioxide", "desnity", "pH", "sulphates", "alcohol", "quality", "wine_type"),
+  Type = c(rep("numeric continuous", 11), "categorical ordinal", "categorical nominal"),
+  Description = c("acidity concentration, (tartaric acid)g/dm^3", "volatile acidity concentraion, (acetic acid)g/dm^3)",
+                  "citric acid concentration, g/dm^3", "residual sugar concentration, g/dm^3", 
+                  "chlorides concentration, (sodium chloride)g/dm^3","free sulfur dioxide concentration, mg/dm^3",
+                  "total sulfur dioxide concentration, mg/dm^3", "density concentration, g/dm^3",
+                  "estimation of pH level", "sulphates concentration, (potassium sulphate)g/dm^3", 
+                  "alcohol percentage in absolute units", "score of wine quality between 0 and 10", 
+                  "wine type"))
+
+kable(wine_metadata_table) %>% 
+  kable_styling() %>% 
+  footnote(general ="shows the metadata table for the wine quality dataset.",
+           general_title = "Table 1:",footnote_as_chunk = T, title_format = c("bold", "underline"))
+```
+
+# Methods
+**Importing and Preprocessing the Data**: The red and wine data was imported into R using the `read.csv()` function and wine type was added to each respective dataset using `rep()` before they were combined. This additional column was converted to a factor and acted as a binary categorical variable for the analysis of this report. The quality variable was then removed from the dataset. The various functions used to import and prep-process the data were from the `base r` and `tidyverse` packages (@R-tidyverse). 
+
+```{r, results=FALSE, echo=TRUE}
+#import wine data
+red_data<- read.csv(file = "winequality-red.csv", sep = ";", header = T)
+white_data <- read.csv(file = "winequality-white.csv", sep = ";", header = T)
+#add wine class to both datasets
+red_data$wine_type = rep("red", nrow(red_data))
+white_data$wine_type = rep("white", nrow(white_data))
+#combine red and white datasets
+combined_wine_data <- rbind(red_data, white_data)
+combined_wine_data$wine_type <- factor(combined_wine_data$wine_type)
+#dropping quality rating 
+combined_wine_data <- combined_wine_data[,-12]
+```
+
+**Data Exploration and Visualisation**: The `dim()`, `str()` and `summary()` functions were using from `base r` to inspected to identify any potential problems with the dataset. The `summary()` function indicated that the dataset contained no missing values and was mainly comprised of white wine observations. To ensure the predictive analysis contained the same number of red and white wine observations, the combined wine dataset was evenly sampled, using the `downsample()` function from the `caret` package (@R-caret). 
+```{r results=FALSE, echo=TRUE}
+#Inspecting data
+dim(combined_wine_data) # get dimension of df: 6497 rows,  12 cols 
+summary(combined_wine_data) #indcates majority of wine observations are white
+str(combined_wine_data) 
+
+#downsample from caret package used to get even distribution of red and white wine observations
+set.seed(0)
+even_combined_wine_data <- combined_wine_data
+even_combined_wine_data<- downSample(x = combined_wine_data[,-12], y = combined_wine_data$wine_type, list = F, yname = "wine_type")
+```
+
+Each numeric variable's distribution was inspected for each wine type using comparative boxplots using the geom_boxplot() extension of ggplot2 (@R-ggplot2). This was implemented using the `melt()` function from the `reshape` package (@R-reshape) which created a long dataset making it easy to facet each boxplot by the numeric variable. The dataset was normalised using the `scale()` function contained within `base r` which used a z score normalisation method to reducing the effect of outliers without removing them. A correlation plot was created by firstly calculating the correlation matrix (`rcorr()`) function and then creating a correlation plot (`corrplot()`). These functions were sourced from the `Hmisc` and `corrplot` packages respectively (@R-Hmisc, @R-corrplot). 
+
+```{r echo=FALSE, eval=FALSE}
+#inspecting the correlation of each variable
+wine_res <- rcorr(as.matrix(even_combined_wine_data[,1:11]))
+corrplot(wine_res$r, type = "upper", order = "hclust",
+         tl.col = "black", tl.srt = 45, p.mat = wine_res$P, sig.level = 0.01, insig = "blank")
+
+#inspect distribution of each numerical variable
+long_even_combined_wine_data<- melt(even_combined_wine_data, id.var = "wine_type")
+
+long_even_combined_wine_data %>% 
+  ggplot(aes(x = variable, y = value))+
+  geom_boxplot(aes(fill = fct_rev(wine_type))) +
+  scale_fill_manual("legend", values = c("red" ="darkred", "white" = "blanchedalmond"))+
+  facet_wrap(~ variable, scales = "free")
+
+```
+
+```{r, echo=TRUE}
+#separateing red_data into predictors and labels
+wine_numerical_predictors <- even_combined_wine_data[,1:11]
+wine_class <- even_combined_wine_data[,12]
+
+#normalise using z score method
+even_wine_norm_data<- as.data.frame(scale(wine_numerical_predictors))
+even_wine_norm_data <- cbind(even_wine_norm_data, wine_class) #adding class to normalised dataset
+```
+
+## Principal Component Analysis
+PCA of a data matrix extracts the dominate patterns in a matrix in terms of the complementary set of score and loading points. This means more responsibility falls to the analyst to formulate inferences in the dataset such as principal component (PC) projections, Proportion of Explained Variance (PVE), PC regressions. This analysis is dependent on the scaling of the matrix and thus must be specified (@zhang2017principal). 
+
+**Performing PCA**: PCA was performed using the normalised wine predictors using the `prcomp()` function from `base r` and scale was set to FALSE. The proportion of explained variation (PVE) was then calculated into a new data frame by squaring the "sdev" (standard deviation) results and dividing it by the total PC variation. 
+```{r echo=TRUE, results=FALSE}
+# Performing PCA
+pca_wine <- prcomp(even_wine_norm_data[,1:11], scale = F)
+
+#calculate Porportion of Variation Explained (PVE) 
+PCA_Var <- pca_wine$sdev^2
+PVE_wine <- as.data.frame(round( PCA_Var/sum(PCA_Var),4)) 
+colnames(PVE_wine) <- "PVE"
+
+#Add labels and cummulative PVE
+PVE_wine <- PVE_wine %>% 
+  mutate(eigen_val = PVE*10,
+         PVE = PVE*100,
+         cum_PVE = cumsum(PVE),
+         PC = paste(c("PC"), 1:11, sep = ""),
+         explained_90_per = ifelse(cum_PVE<92, "Y", "N"),
+         eig_great_than_1 = ifelse(eigen_val>1, "Y","N")) %>%
+  dplyr::select(PC, PVE, eigen_val, cum_PVE, explained_90_per, eig_great_than_1)
+
+#plotting the first 3 PCA resutlss on 3D scatter
+x = pca_wine$x[,1]
+y = pca_wine$x[,2]
+z = pca_wine$x[,3]
+
+wine_class <- even_wine_norm_data$wine_class
+wine_class <- factor(wine_class, 
+                     levels = c("red", "white"),
+                     labels = c(0,1))
+
+```
+
+**Visualisation and Interpretation of PCA**: Two bar graphs were constructed, the first graph showcased the PVE each PC contributed and the second displayed accumulative PVE of the PCs. These graphs were used to identify which dimension or PC contributed to 90% of the explained variation (@zhang2017principal). The two PCs that contributed most of the variation of the dataset are PC1 and PC2, and thus a biplot was used to showcase the patterns in the dataset and the effect each variable had on these patterns. This was generated using the `autoplot()` function from the `ggfortify` package (@R-ggfortify). 
+```{r echo=TRUE, eval=FALSE}
+#graphed PC variation
+PVE_wine %>% 
+  ggplot(aes(x=fct_reorder(PC, cum_PVE), y = PCA_Var, fill = explained_90_per))+
+  geom_bar(stat = "identity") +
+  geom_text(aes(label = paste(cum_PVE, "%", sep= "")))+
+  theme(axis.text.x = element_text(angle=60, hjust=1), legend.position = "none")+
+  ggtitle("Principal Component Percent Variation")+
+  xlab("Principal Component")+ 
+  ylab("PC variation (%)")+
+  scale_fill_discrete(name = "Contributes to 90%\nof variation")
+
+#PVE Accumulation Graph
+PVE_wine %>% 
+  ggplot(aes(x = fct_reorder(PC, cum_PVE), y = cum_PVE, fill = explained_90_per))+
+  geom_bar(stat = "identity", color = 'black')+
+  geom_hline(yintercept = 90, linetype = "dashed", size = 1)+
+  geom_text(aes(label = paste(PVE, "%", sep= "")), vjust = -0.25)+
+  theme(axis.text.x = element_text(angle=60, hjust=1))+
+  labs(x = "Principal Component", y = "Accumulative PVE", fill = "Contributes to\n90% of variation",
+       title = "Accumulative PVE for Red Wine")
+
+# Biplopt showing the loading of each variable 
+autoplot(pca_wine, data = even_wine_norm_data, colour = "wine_class", 
+         loadings = TRUE, loadings.colour = 'blue',
+         loadings.label = TRUE, loadings.label.size = 3, loadings.label.colour = "black")
+```
+
+## Supervised Classification
+**Separating the Data**: Prior to beginning classification, the training and testing indices were compiled by sampling the dimensions of the normalised wine dataset in order to randomly select the two datasets necessary for generative analysis. 
+```{r, echo=TRUE}
+#############################################################################################################
+#Separating data into test and training
+#get training (20% of dataset) and test (80% of dataset) datasets
+set.seed(123)#sets the random gnerateor where to begin generating random numbers
+num_wine_obs <- dim(even_wine_norm_data)[1]
+wine_test_index <- sample(num_wine_obs, size = as.integer(num_wine_obs*0.2), replace = F) #test data indexes
+wine_training_index <- -wine_test_index #generates negative indices to remove test data
+wine_test_data <- even_wine_norm_data[wine_test_index,]
+wine_training_data <- even_wine_norm_data[wine_training_index,]
+#######################################################################################################
+```
+
+### Training Naive Bayes, Linear Discriminant Analysis and Quadratic Discriminant Analysis
+**Training Naïve Bayes (NB), Linear Discriminant Analysis (LDA), Quadratic Discriminant Analysis (QDA)**: these three models are based off the Bayes Theorem used to calculate conditional probability, the probability of event A given that event B has occurred [denoted as P(A|B)]. Each model have their own assumptions which produce different performance metrics of the same test data. The formula used to calculate the posterior probabilities (P(A|B) occurring) can be calculated using the formula: $$\mathrm{P}(A \mid B) = \frac{P(B|A)*P(A)}{P(B)}$$
+
+**Where**: $\mathrm{P}(A \mid B)$ is the Posterior Probability, $\mathrm{P}(B \mid A)$ is the Prior Probability, $\mathrm{P}(A)$ is the probability of event A occurring, $\mathrm{P}(B)$ is the probability of event B occurring
+
+NB is the most flexible model of mention supervised models as it assumes that all predictors correlate in some way, thus making the model naive (@stephens2018naive). LDA and QDA have a linear and quadratic decision surface respectively which means that QDA is more flexible at classifying overlapping clusters whilst LDA is better at classifying separated clusters (@wu1996comparison). This is because QDA assumes all numeric features have different covariances whilst LDA assumes all covariance are the same. One assumption that the three models share is that they assume that each numeric predictor follows a Gaussian distribution (@wu1996comparison, @stephens2018naive). Thus if variables in a dataset do not it can impair the accuracy of the classification. 
+
+The three supervised models were trained in succession and confusion matrices were generated to reveal the results of predicting the test data. The NB algorithm, `naive_bayes()` was attained from the `naivebayes` package (@R-naivebayes) and LDA and QDA models, `lda()` and `qda()`, from the `MASS` package (@R-MASS).
+```{r, results=FALSE, warning= FALSE, echo=TRUE}
+nb_fit <- naive_bayes(wine_class~., data = wine_training_data)
+nb_pred_class <- predict(nb_fit, wine_test_data, type = 'class')
+nb_cm <- table(nb_pred_class, wine_test_data[,12])
+
+lda_fit <- lda(wine_class~., data = wine_training_data)
+lda_pred_class <- predict(lda_fit, wine_test_data, type = 'class')$class
+lda_cm <- table(lda_pred_class, wine_test_data[,12])
+
+qda_fit <- qda(wine_class~., data = wine_training_data)
+qda_pred_class <- predict(qda_fit, wine_test_data, type = 'class')$class
+qda_cm <- table(qda_pred_class, wine_test_data[,12])
+```
+
+**k Nearest Neighbour Cluster**: KNN is another method of supervised classification that predicts new data after previously being training with data containing binary class. The benefit of this model compared to other classifiers is that it categorises datapoints based off the distance between 2 points in which it may be generalised that half of the total information needed for classification purposes is contained in the nearest neighbour (@li2018automatic). KNN attempts to estimate the conditional distribution of Y given X [denoted as P(Y|X)] and then classify a given observation according to the highest estimated probability. The formula used to calculate this is: $$\mathrm{P}(Y = j \mid X = x_{0}) = \frac{1}{K}\sum_{i \in N_{0}}{I(y_{i}=j)}$$
+
+**Where**: K is a positive integer,  is a test observation, $N_{0}$ is the K points in the training data that are closest to $x_{0}$, and j is the class. 
+
+The most appropriate k parametric was calculated using the `trainControl()` and `train()` function from the `caret` package (@R-caret). (@afendras2019optimality) reported that establishing the k parameter was paramount in KNN supervised classification. The parameter k = 9 yielded the highest Area Under the ROC Curve and the KNN model was then trained with the `knn()` function from the `class` package (@R-class) followed by a prediction confusion matrix using the table() function from `base r`.
+```{r, results=FALSE, echo=TRUE}
+#performing KNN supervised classification
+set.seed(0)
+ctrl <- trainControl(method="repeatedcv",repeats = 3)
+knnFit <- train(wine_class ~ ., data = wine_training_data, method = "knn", trControl = ctrl, preProcess = c("center","scale"),tuneLength = 20)
+#revealled that k = 9 had the highest accuracy
+
+#### Perform supervised KNN where k = 9
+knn_pred_class<- knn(train = wine_training_data[,1:11], test = wine_test_data[,1:11], 
+                   cl = wine_training_data$wine_class, k = 9, prob = T)
+
+knn_cm <- table(knn_pred_class, wine_test_data$wine_class)
+
+```
+
+**Model Evaluation**: The 6 metrics were user to evaluate the performance of the classification models which included, Accuracy, Error, Precision, Recall value, F1 score and area under the curve (AUC). To calculate and display this, three user defined functions were implemented, a function that calculated the AUC of a model utilising the `ROCR` package (@R-ROCR), a function that calculated and returned a list of the 6 metrics and a function that formatted the metrics into a data frame which used the `kable()` function and extensions from`knitr` (@R-knitr) and `kableExtra()` packages (@R-kableExtra).
+
+```{r, echo=TRUE, results=FALSE}
+#Calculates AUC
+calculate_auc_val <- function(predicted, observed){
+  predicted = ifelse(predicted == "red", 1, 0)
+  observed = ifelse(observed == "red", 1, 0)
+  Pred_Obj <- prediction(predicted, observed) #evaluates classifier
+  auc <- performance(Pred_Obj, measure = "auc") #calculates performance
+  auc <- auc@y.values[[1]] #gets AUC value
+  return(auc)
+}
+
+#Calculates evaluation metrics for NB, LDA QDA and KNN models
+calc_metrics <- function(conf_matrix, pred_class, wine_test_class){
+  accuracy <- sum(diag(conf_matrix))/sum(conf_matrix) #calculating the accuracy metric
+  error <- 1-accuracy #calculating the error metric
+  precision <- conf_matrix[1,1]/sum(conf_matrix[1,]) #calculating the precision metric
+  recall_val <-  conf_matrix[1,1]/sum(conf_matrix[,1]) #calculating the recall metric
+  f1_score <- 2*precision * recall_val/(precision + recall_val) #calculating the f1_score metric
+  auc <- calculate_auc_val(pred_class, wine_test_class) #calculating AUC
+  metric_list <- list(accuracy, error, precision, recall_val, f1_score, auc) #storing all matrics in a list
+  return(metric_list)
+}
+
+#Call metric function for all models
+nb_metric_list <- calc_metrics(nb_cm, nb_pred_class, wine_test_data[,12])
+lda_metric_list <- calc_metrics(lda_cm, lda_pred_class, wine_test_data[,12])
+qda_metric_list <- calc_metrics(qda_cm, qda_pred_class, wine_test_data[,12])
+knn_metric_list<- calc_metrics(knn_cm, knn_pred_class, wine_test_data[,12])
+
+#generate a nice summary data frame for each model
+display_model_evaluation <- function(metrics, model_name){
+  display_acc <- paste(round(metrics[[1]]*100,2), "%", sep = "") # adds a % sign to accuracy and rounds to 2
+  display_error <- display_err <- paste(round(metrics[[2]]*100,2), "%", sep = "") # adds a % sign to accuracy to 2
+  display_prec <- round(metrics[[3]],2)
+  display_recall <- round(metrics[[4]],2)
+  display_F1<- round(metrics[[5]],2)
+  display_auc <- round(metrics[[6]],4)
+  summary_df <- rbind(display_acc, display_err, display_prec, display_recall, display_F1, display_auc)
+  rownames(summary_df) <- c("Accuracy", "Error", "Precision", "Recall", "F1 Score", "AUC")
+  colnames(summary_df) <- model_name
+  return(as.data.frame(summary_df))
+}
+
+summary_nb_table <- display_model_evaluation(nb_metric_list, model_name = "Naive Bayes") 
+summary_lda_table <- display_model_evaluation(lda_metric_list , model_name = "LDA")
+summary_qda_table <- display_model_evaluation(qda_metric_list , model_name = "QDA")
+summary_knn_table <- display_model_evaluation(knn_metric_list, model_name = "kNN")
+
+kable(cbind(summary_nb_table, summary_lda_table, summary_qda_table, summary_knn_table)) %>% 
+  kable_styling() %>% 
+  footnote(general ="shows the performance metrics of the 4 supervised classification models for the testing dataset",
+           general_title = "Table 2")
+```
+
+# Results
+# {.tabset}
+## Boxplots
+```{r, echo = TRUE, fig1, fig.cap= "**Figure 1**: Boxplot distributions for red and white observation faceted by wine type"}
+#inspect distribution of each numerical variable
+long_even_combined_wine_data<- melt(even_combined_wine_data, id.var = "wine_type")
+
+long_even_combined_wine_data %>% 
+  ggplot(aes(x = variable, y = value))+
+  geom_boxplot(aes(fill = fct_rev(wine_type))) +
+  scale_fill_manual("legend", values = c("red" ="darkred", "white" = "blanchedalmond"))+
+  facet_wrap(~ variable, scales = "free")
+```
+The comparative boxplots revealed that all numerical variable contained outliers. Majority of the white wine plots follow a normal distribution however, residual sugar and free sulphur dioxide display longer tails has a longer tail in the 4th quartile. For red wine, citric acid, volatile acidity, pH, free sulphur dioxide and alcohol all relatively follow a gaussian distribution. Fixed acidity and sulphates look positively skewed for red wine. In both wine types, Chloride looks to be impacted the most by outliers. 
+
+## Correlation Plot
+```{r, echo = TRUE,fig2, fig.height = 4, fig.width = 6, fig.cap="**Figure 2**: Corellation Plot of all numeric predictors"}
+wine_res <- rcorr(as.matrix(even_combined_wine_data[,1:11]))
+corrplot(wine_res$r, type = "upper", order = "hclust",
+         tl.col = "black", tl.srt = 45, p.mat = wine_res$P, sig.level = 0.01, insig = "blank")
+```
+As expected total sulfur dioxide and free sulfur dioxide display the highest positive correlation followed by fixed acidity and chlorides. This however is not revealing because free sulfur dioxide is a subset of the total sulfur. Alcohol and density show strongest negative correlation followed by volatile acidity and total sulfur dioxide. No correlation is present in pH with either density or chloride or alcohol with either sulphates and citric acid.
+
+# Principal Component Analysis
+# {.tabset}
+## PVE of each PC
+```{r, echo = TRUE, fig3, fig.height = 3, fig.width = 6, fig.cap= "**Figure 3**: shows the PC percentage variation."}
+PVE_wine %>% 
+  ggplot(aes(x=fct_reorder(PC, cum_PVE), y = PVE))+
+  geom_bar(stat = "identity", color = "black", fill = "orange") +
+  geom_text(aes(label = paste(PVE, "%", sep= "")), vjust = -0.25)+
+  theme(axis.text.x = element_text(angle=60, hjust=1))+
+  ggtitle("Principal Component Percent Variation")+
+  xlab("Principal Component")+ 
+  ylab("PC variation (%)")
+```
+
+## Accumulative PVE of each PC
+```{r, echo=TRUE, fig4, fig.height = 3, fig.width = 6, fig.cap="**Figure 4**: Shows the accumulative varaition of each PC and the PCs that contribute to 90% of explained PVE." }
+PVE_wine %>% 
+  ggplot(aes(x = fct_reorder(PC, cum_PVE), y = cum_PVE, fill = explained_90_per))+
+  geom_bar(stat = "identity", color = 'black')+
+  geom_hline(yintercept = 90, linetype = "dashed", size = 1)+
+  geom_text(aes(label = paste(cum_PVE, "%", sep= "")), vjust = -0.25)+
+  theme(axis.text.x = element_text(angle=60, hjust=1), legend.position = "bottom")+
+  labs(x = "Principal Component", y = "Accumulative PVE", fill = "Contributes to\n90% of variation",
+       title = "Accumulative PVE for Red Wine")
+
+```
+
+#
+Weights of the PCs are calculated **Figure 3** clearly displays that PC1 and PC2 contribute to majority of variance on the dataset. This is also evident in the PVE bar graph in **Figure 4** which displays that PC1 and PC2 contribute 52.07% of all variance of the dataset. This is also displayed in **Figure 4** as PCs 1-7 added together contributes 91.3%% of the total variance or the dataset. 
+
+## PCA Biplot of PC1 and 2
+```{r fig5, echo=TRUE, fig.height = 3, fig.width = 5, fig.cap="**Figure 5**: shows a biplot PC1 and PC2 and the labelled eigan vector of the dataset."}
+autoplot(pca_wine, data = even_wine_norm_data, colour = "wine_class", 
+         loadings = TRUE, loadings.colour = 'blue',
+         loadings.label = TRUE, loadings.label.size = 3, loadings.label.colour = "black",  frame = T, frame.type = "norm")
+```
+This plot displays that that the red and white observation form two distinct clusters which is highlighted by two ellipses. The blue arrows are the variable loadings which indicate free sulfur dioxide, total sulfur dioxide, volatile acidity, sulphates and chlorides have a stronger influence on PC1 than PC2 whilst, alcohol, citric acid, pH and density seem to have a larger effect on PC2 compared to PC1. Residual sugar, fixed acidity and pH show a relatively equal influence on PC1 and PC2 as the arrows are directed at an equal orientation between PC1 and PC2.
+
+# Supervised Analysis Evaulation
+# {.tabset}
+## Evaulation Table
+```{r, echo=TRUE}
+kable(cbind(summary_nb_table, summary_lda_table, summary_qda_table, summary_knn_table), align = "c") %>% 
+  kable_styling() %>% 
+  footnote(general ="shows the performance metrics of the 4 supervised classification models for the testing dataset",
+           general_title = "Table 2: ",footnote_as_chunk = T, title_format = c("bold", "underline"))
+```
+
+Overall the performance of all models was extremely high on the testing dataset displaying high values in Accuracy, Precision, Recall, F1 score and AUC and a low Error percentage. This overall high performance was most evident in the Accuracy as the range was 1.88%. This indicates that all algorithms have a high ability to differentiate wine type from the 11 numeric predictors. LDA performed marginally better then KNN (was a Accuracy diff. = 0.31% and AUC diff. = 0.0031) and yielded the best metrics out of all classification models with an accuracy of 98.9% and AUC of 0.989. 
+
+## Variable Importance
+```{r fig6, echo = FALSE, fig.height = 3, fig.width = 5, fig.align = "center", fig.cap= "Figure 6: Variable that are most important in classifying Red and White wine"}
+variable_importance <- as.data.frame(filterVarImp(even_combined_wine_data[,1:11], even_combined_wine_data[,12]))
+variable_importance<- variable_importance[order(variable_importance$red, decreasing = T),]
+variable_importance %>%
+  mutate(least_important = ifelse(red<0.7, "Y", "N")) %>%
+  ggplot(aes(x = fct_reorder(row.names(variable_importance), -red, .fun = sum), y = red, fill = fct_rev(least_important)))+
+  geom_bar(stat="identity")+
+  theme(axis.text.x = element_text(angle=60, hjust=1), legend.position = "none")+
+  labs(title = "Variable Importance for Differentiating\nRed and White Wine Data", y= "Area Under ROC Curve", x = "Variables")
+```
+The three most important variables with classifying red and white wine are total sulfur dioxide, chlorides and volatile acidity. The least important for classification are residual sugar, citric acid and alcohol. 
+
+# Discussion
+The purpose of this report was to identify the patterns present in the dataset by performing principal component analysis and accurately classify the wine type using a number of supervised classification techniques. This discussion will firstly discuss the findings in the PCA and then compare the supervised classification models. 
+
+### **PCA Findings**
+Normalisation of all numeric predictors change all varying scales and unit between 0 and 1 and ensured that all variables had the same weight. PCA revealed that the first 7 PCs on the dataset contribute 91.3% of the total variation of the dataset and that PC1 and PC2 attribute over half of the total variance (See **Figure 4** and **5**). This means that the wine quality dataset can be reduced to the first 7 components without compromising the proportion of variance in the dataset (@zhang2017principal, @camiz2018identifying). The PCA results also indicated that the first 3 PCs all had a eigen value greater than 1 and thus were the most stable when explaining the variation of the wine dataset (@camiz2018identifying).
+
+A noisy biplot of PC1 and PC2 was generated to inspect the patterns displayed the even wine quality dataset (@zhang2017principal). The biplot is noisy because PC1 and PC2 explain 52.07% of the total variance and more PCs are needed to accurately explain the patterns in the dataset. However, @zhang2017principal stated that plotting of the first 2 PCs is beneficial in order to visualise the shape of clusters in the dataset, even if they are noisy. This biplot displayed that majority of the red and white observations are contained within 2 distinctive clusters (See **Figure 5**). As stated earlier, certain variables have a greater influence on PC1 and PC2 respectively. The attributes, free sulfur dioxide, total sulfur dioxide, volatile acidity, sulphates, pH and chlorides have a stronger influence on PC1 than PC2 whereas alcohol, citric acid and density have a larger influence on PC2 than PC1. The direction of the loading arrows seems to reveal that PC1 is highly influenced by chemical features of the wine dataset whilst PC2 is influenced by physical attributes of the wine such as, density. 
+
+### **Supervised Classification Findings**
+The overall performance of the models can be attributed to evenly sampling the red and white wine observation from the raw dataset and normalising all numeric predictors. The data was purposefully sampled to create a new data frame containing an equal amount of red and white observations. This even distribution of observations yielded higher performance metrics across the models. The Z score normalisation method was purposefully choses to reduce the effect of outliers by not remove them from the dataset, thus protecting the data integrity of the dataset (@gullion1996effects). @gullion1996effects stated that before normalising the data, the dataset must be understood as various normalization method has substantial but different effects on characteristics of the data and statistical results.
+
+**Table 2** displays that LDA was the best performing model followed closely by KNN (AUC diff. of 0.0031), then QDA and finally NB. As stated in the results all models performed extremely well with minor differences (Accuracy range of 1.56%). This is most evident in AUC (AUC ranging 0.0156) as this metric is a mode discriminate measure of accuracy compared to the other performance metrics (@elliott1993assessing). **Figure 3** indicated that total sulfur dioxide chlorides and volatile acidity were the most important when classifying red and white observation. This bar graph also displayed that residual sugar, citric acid and alcohol were the least important in the classification. This indicates that the important aspects used in classifying red and white wine are most likely due to the inherent differences that occur during the fermentation process whilst the least important aspect for classification are the characteristics similar between red and wine observations. These features may have affected LDA and QDA models as these algorithms assume that all variables are correlated to some extent (@wu1996comparison). If these three attributes were removed from the dataset, performance metrics for LDA and QDA may have improved. 
+
+LDA performed the best out of all algorithms due to a number of reasons, the datasets was relatively small, all numeric features of the datasets displayed a relatively normally distributed (See **Figure 1**) and that the red and wine observation formed 2 distinct clusters with minimal overlap which is optimal for LDA (See **Figure 3**) (@wu1996comparison). QDA also is able to separate clusters with this boundary but is not a strict in terms of linear boundaries and performs better when datasets are overlapped (@wu1996comparison). As the dataset contains two distinct clusters, KNN analysis was also very accurate in discerning red and white observations. This is because KNN categorises data observations based off the distance between two points in which it may be generalised that half of the total information needed for classification is contained in the nearest neighbour (@li2018automatic). Interestingly, NB was the most naïve model but performed just as well as the other stringent models. This is mainly due to fact that NB assumes independence among features, works well with dataset that are relatively small and thrives in binary classification problems (@stephens2018naive). 
+
+# Conclusion
+Overall, the analysis performed on the wine quality dataset gave various insights into the respective differences between red and white wines and indicated LDA was the most accurate method of supervised classification. PCA revealed that the red and white wine observation formed two distinctive clusters with majority of the variation occurring for the first 7 PCs. Overall all classification algorithms were accurately performed due to the pre-processing decisions enacted on the data prior to training the algorithms. 
+
+LDA was the most accurate supervised classification method followed by KNN due to the separation of red and white clusters. Thus LDA was able to classify each respective wine class in each linear boundary with great accuracy. The most important aspects when classifying red and white wines was sulfur dioxide, chlorides and volatile acidity whilst the least important aspects in differentiating was residual sugar, citric acid and alcohol. This indicates that the important aspects used in classifying red and white wine are most likely due to the inherent differences that occur during the fermentation process whilst the least important aspect for classification are the characteristics similar between red and wine observations occur in the production of these wine.
+
+# References
+
+
+
