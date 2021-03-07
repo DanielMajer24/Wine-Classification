@@ -1,4 +1,4 @@
-# Supervised Classification for Red and White Wine
+# Supervised Classification for Red and White Wine Using R
 
 The following report was a final capstone project for Introduction to Data Mining Subject which required students to use selected supervised classification or regression algorithms to analyse a dataset. The following extract is the abstract of the report listed in the hyperlink listed below detailing the scope of the project, methods used and overall findings and recommendations. 
 
